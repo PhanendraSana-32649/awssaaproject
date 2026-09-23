@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CloudTrail Central — Log Aggregation Dashboard</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="topbar">
+  <div><div class="eyebrow">AWS SECURITY OBSERVABILITY</div><h1>CloudTrail Central</h1>
+  <p>Multi-account log aggregation dashboard</p></div>
+  <div class="mode {{ 'demo' if demo_mode else 'live' }}">{{ 'DEMO MODE · SAMPLE RECORDS' if demo_mode else 'AWS MODE · LIVE API' }}</div>
+</header>
+<main>
+  <section class="notice">
+    {% if demo_mode %}<strong>Demonstration environment:</strong> the displayed events are synthetic sample data, not evidence of AWS deployment. Configure AWS access and set <code>DEMO_MODE=false</code> to query CloudTrail for the selected account and region.{% else %}
+    <strong>AWS connection enabled:</strong> events are retrieved from the configured account using CloudTrail LookupEvents. This is account/region lookup, not proof of an organization-wide trail.{% endif %}
+  </section>
+  <section class="metrics">
+    <article class="metric"><span>Total events shown</span><strong id="total">—</strong></article>
+    <article class="metric"><span>Accounts represented</span><strong id="accounts">—</strong></article>
+    <article class="metric"><span>Events flagged for review</span><strong id="review">—</strong></article>
+  </section>
+  <section class="panel">
+    <div class="panel-head"><div><h2>Recent activity</h2><p>Filter and inspect captured management events.</p></div>
+      <button id="refresh">Refresh data ↻</button></div>
+    <div class="filters">
+      <input id="search" type="search" placeholder="Search event, service, user, account…" aria-label="Search events">
+      <select id="status" aria-label="Filter by status"><option value="">All statuses</option><option>RECORDED</option><option>REVIEW</option></select>
+    </div>
+    <div class="table-wrap"><table><thead><tr><th>Time (UTC)</th><th>Event</th><th>Service</th><th>User</th><th>Account</th><th>Region</th><th>Status</th><th>Details</th></tr></thead>
+    <tbody id="rows"><tr><td colspan="8">Loading…</td></tr></tbody></table></div>
+    <p class="footnote">AWS LookupEvents returns management events from the last 90 days, with up to 50 records per request. This prototype requests one page.</p>
+  </section>
+  <section class="panel"><h2>Project scope & limitations</h2>
+    <ul><li>Dashboard backend: Flask REST endpoints with optional Boto3 CloudTrail integration.</li>
+    <li>Current AWS integration reads events from one configured account/region.</li>
+    <li>Organization-wide aggregation requires an AWS Organizations organization, suitable management-account permissions, and an organization trail with a centralized destination.</li>
+    <li>Sample records are clearly marked and must not be presented as deployed AWS evidence.</li></ul>
+  </section>
+</main>
+<div id="modal" class="modal hidden"><div class="modal-card"><button id="close" class="close">✕</button><h2>Event details</h2><pre id="detail"></pre></div></div>
+<script>
+const $ = id => document.getElementById(id);
+async function refresh() {
+  $('rows').innerHTML = '<tr><td colspan="8">Loading…</td></tr>';
+  try {
+    const [s, e] = await Promise.all([
+      fetch('/api/summary').then(r => r.json()),
+      fetch('/api/events?q=' + encodeURIComponent($('search').value) + '&status=' + encodeURIComponent($('status').value)).then(r => r.json())
+    ]);
+    if (s.error || e.error) throw new Error(s.error || e.error);
+    $('total').textContent = s.total_events;
+    $('accounts').textContent = s.accounts_seen;
+    $('review').textContent = s.review_events;
+    $('rows').innerHTML = e.events.length ? '' : '<tr><td colspan="8">No matching events.</td></tr>';
+    e.events.forEach(event => {
+      const tr = document.createElement('tr');
+      const vals = [event.event_time ? new Date(event.event_time).toLocaleString() : '—', event.event_name, event.event_source, event.username, event.account_id, event.region, event.status];
+      vals.forEach((v, i) => { const td = document.createElement('td'); td.textContent = v || '—'; if (i === 6) td.innerHTML = '<span class="pill '+(v==='REVIEW'?'warning':'safe')+'">'+escapeHtml(v)+'</span>'; tr.appendChild(td); });
+      const td = document.createElement('td'); const b = document.createElement('button'); b.className='small'; b.textContent='View'; b.onclick=()=>showDetails(event); td.appendChild(b); tr.appendChild(td); $('rows').appendChild(tr);
+    });
+  } catch (err) { $('rows').innerHTML = '<tr><td colspan="8">Error: '+escapeHtml(err.message)+'</td></tr>'; }
+}
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function showDetails(event) { $('detail').textContent=JSON.stringify(event,null,2); $('modal').classList.remove('hidden'); }
+$('refresh').onclick=refresh; $('search').addEventListener('input',refresh); $('status').onchange=refresh;
+$('close').onclick=()=>$('modal').classList.add('hidden'); $('modal').onclick=e=>{if(e.target===$('modal'))$('modal').classList.add('hidden');};
+refresh();
+</script>
+</body></html>
